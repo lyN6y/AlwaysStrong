@@ -200,7 +200,7 @@ if [ "$ENGINE" = "none" ]; then
 # standalone PlayIntegrityFork, sync its fingerprint into the attested identity and
 # re-assert the STRONG spoof flags it resets; otherwise it's attestation + keybox only.
 # lite_pif_sync identifies the standalone module (only real PlayIntegrityFork /
-# PlayIntegrityFix inject-s qualify — an Integrity Box or other id-squatter is left
+# PlayIntegrityFix inject-s qualify — an id-squatting keystore toolkit is left
 # alone) and prints the kind. Report exactly what it synced, or fall back to the
 # plain PIF-less message.
 # On Lite the standalone PIF owns the fingerprint (AlwaysStrong only mirrors it into
@@ -222,6 +222,17 @@ else
 # whichever lands ends up in the file this build's zygisk reads, with that
 # engine's STRONG flags applied. A failed primary shows once as "trying with
 # fallback".
+if as_on custom_pif; then
+# User imported their own fingerprint (Advanced > Import) — the pif counterpart
+# of a custom keybox. Do NOT fetch/overwrite it; just report which pif is loaded.
+# The patch (Step 4) and model (Step 5) rows below still read it via pick_pif.
+_pn=$(st_get pif_name 2>/dev/null)
+_pm=$(st_get pif_model 2>/dev/null)
+row "🧬" "custom pif — skip fetch"
+[ -n "$_pm" ] && row "📱" "$_pm"
+[ -n "$_pn" ] && row "📄" "$_pn"
+row "💡" "enable fingerprint in webui for auto"
+else
 FP_OK=0
 FP_SRC=""
 
@@ -277,6 +288,7 @@ case "$FP_SRC" in
     local)      row "🌐" "fingerprint ok (local)" ;;
     *)          row "❗" "fingerprint failed" ;;
 esac
+fi
 sleep 1
 
 # --- Step 4: Spoof settings + security patch ---
@@ -288,21 +300,29 @@ PATCH=""
 [ -f "$MODPATH/sync_patch.sh" ] && PATCH=$(sh "$MODPATH/sync_patch.sh" boot 2>/dev/null)
 
 pick_pif() {
-    for f in "$CONFIG_DIR/custom.pif.prop" "$MODPATH/custom.pif.prop" \
-             "$CONFIG_DIR/pif.prop" "$MODPATH/pif.prop"; do
+    # Module dir first: it holds the engine's ACTIVE pif for every source (auto,
+    # beta, Import). $CONFIG_DIR/pif.prop is only the last auto-fetch and is stale
+    # after an Import / beta pick, so it must not shadow the module-dir file.
+    for f in "$MODPATH/custom.pif.prop" "$MODPATH/pif.prop" \
+             "$CONFIG_DIR/custom.pif.prop" "$CONFIG_DIR/pif.prop"; do
         [ -s "$f" ] && { echo "$f"; return 0; }
     done
     return 1
 }
 PIF=$(pick_pif)
+# Device identity straight from the pif: brand + model, e.g. "Google Pixel 6a"
+# (skip the manufacturer when the model already starts with it).
 MD=$(grep -m1 '^MODEL=' "$PIF" 2>/dev/null | cut -d= -f2-)
+MAN=$(grep -m1 '^MANUFACTURER=' "$PIF" 2>/dev/null | cut -d= -f2-)
+case "$MD" in "$MAN "*|"$MAN"|'') ;; *) [ -n "$MAN" ] && MD="$MAN $MD" ;; esac
 [ -z "$PATCH" ] && PATCH=$(grep -m1 '^SECURITY_PATCH=' "$PIF" 2>/dev/null | cut -d= -f2-)
 
 row "📅" "${PATCH:-unknown}"
 sleep 1
 
 # --- Step 5: Device ---
-row "📱" "${MD:-unknown}"
+# custom-pif already printed the device in Step 3, so don't repeat it here.
+as_on custom_pif || row "📱" "${MD:-unknown}"
 sleep 1
 fi
 

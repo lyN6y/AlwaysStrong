@@ -57,6 +57,28 @@ if ! grep -q '^FINGERPRINT=google/' "$TMP" 2>/dev/null && \
 fi
 
 if engine_install_pif "$TMP"; then
+    # An imported fingerprint is a custom pif, the fingerprint counterpart of a
+    # custom keybox: turn the auto fingerprint refresh OFF so the next boot /
+    # hourly / Action pass does not fetch over it, and remember the file name so
+    # the WebUI and the Action screen can show which pif is loaded.
+    if command -v as_set >/dev/null 2>&1; then
+        as_set custom_pif 1
+        as_set auto_fp 0
+        st_set pif_name "${SRC##*/}"
+        # The pif's own device identity (brand + model), shown next to the file
+        # name in the WebUI and the Action — e.g. "Google Pixel 6a". MODEL keeps
+        # its spaces, so grep/cut rather than word-splitting.
+        _man=$(grep -m1 '^MANUFACTURER=' "$TMP" 2>/dev/null | cut -d= -f2- | tr -d '"\r')
+        _mdl=$(grep -m1 '^MODEL=' "$TMP" 2>/dev/null | cut -d= -f2- | tr -d '"\r')
+        case "$_mdl" in "$_man "*|"$_man") _dev="$_mdl" ;; *) _dev="$_man $_mdl" ;; esac
+        _dev=$(echo "$_dev" | sed 's/^ *//;s/ *$//')
+        [ -n "$_dev" ] && st_set pif_model "$_dev" || st_del pif_model
+    fi
+    # Drop the previous auto-fetch copy: it names a different device + patch, and
+    # leaving it behind would let a stale fingerprint resurface (e.g. in the RS
+    # attestation's /data/adb/pif.prop). The engine's own custom.pif.prop / pif.prop
+    # in the module dir is the active one from here on.
+    rm -f "$CONFIG_DIR/pif.prop" 2>/dev/null
     [ -f "$MODPATH/sync_patch.sh" ] && sh "$MODPATH/sync_patch.sh" >/dev/null 2>&1
     # On the teesim keystore engine the attested identity is baked into
     # /data/adb/teesim/config.json — regenerate it from the just-imported

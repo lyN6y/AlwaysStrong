@@ -95,7 +95,13 @@ bounded() { _bs="$1"; shift; if [ -n "$TO" ]; then $TO "$_bs" "$@"; else "$@"; f
 # aimed at a scratch dir and those lines are stripped — the engine adapter
 # appends the set its own zygisk reads. Seeding the scratch copy from the
 # current pif.prop keeps asfetch's security-patch reuse working.
-if [ -n "$ABI" ] && [ -x "$ASFETCH" ]; then
+# DISABLED: `asfetch autopif` installs the NEWEST Pixel Canary (Pixel 9 / 10),
+# which Google no longer grants STRONG — it cross-checks the claimed first-API
+# level against the device's real launch OS, so only a device that actually
+# shipped on Android <=12 (the Pixel 6 series) stays consistent. The Pixel 6
+# beta fetch added below is the primary path now; this block is kept (behind a
+# false guard) only so the in-process fetcher can be restored if that changes.
+if false && [ -n "$ABI" ] && [ -x "$ASFETCH" ]; then
     NW="$CONFIG_DIR/.pif_asfetch.$$"
     mkdir -p "$NW"
     # The caller bounds us with `timeout`, so a SIGTERM lands mid-fetch often
@@ -186,6 +192,36 @@ trap 'rm -rf "$W"' EXIT
 trap 'rm -rf "$W"; exit 143' TERM
 trap 'rm -rf "$W"; exit 130' INT
 
+# ---- 0. PRIMARY: a STRONG-capable Pixel 6 identity from the canary repo ------
+# Only a device that genuinely launched on Android <=12 still earns STRONG, so
+# the auto-fetch targets the Pixel 6 series. These are pulled from the `devices`
+# folder of the public canary-miner repo (kept fresh by its maintainer) — the
+# real Android *Canary* builds (`:CANARY/ZP11.…`), NOT the `betas/` QPR track
+# (`:17/DP11.…`), because the Canary identity is the one that holds STRONG.
+# bluejay (Pixel 6a) is the one confirmed to still hold STRONG.
+BETA_RAW="https://raw.githubusercontent.com/Vagelis1608/get_the_canary_miner/main/devices"
+try_beta() { # $1=codename -> installs it into the engine, 0 on success
+    _c="$1"
+    fetch "$W/$_c.pif.prop" "$BETA_RAW/$_c.pif.prop" || return 1
+    grep -q '^FINGERPRINT=google/' "$W/$_c.pif.prop" 2>/dev/null || return 1
+    # Keep only the canonical identity keys; the engine adapter appends the
+    # spoof flags its own zygisk reads (the file's own spoof* lines are dropped).
+    grep -E '^(MANUFACTURER|MODEL|FINGERPRINT|PRODUCT|DEVICE|SECURITY_PATCH|DEVICE_INITIAL_SDK_INT)=' \
+        "$W/$_c.pif.prop" > "$W/identity.prop" 2>/dev/null
+    grep -q '^FINGERPRINT=' "$W/identity.prop" || return 1
+    engine_spoof_block >> "$W/identity.prop"
+    engine_install_pif "$W/identity.prop" || return 1
+    cp -f "$W/identity.prop" "$TARGET" 2>/dev/null
+    log "installed STRONG Pixel 6 fingerprint ($ENGINE): $(grep '^FINGERPRINT=' "$W/identity.prop" | cut -d= -f2-)"
+    return 0
+}
+# Only bluejay (Pixel 6a) actually holds STRONG right now — oriole (Pixel 6) and
+# raven (Pixel 6 Pro) are demoted in practice even though they launched on the
+# same Android 12, so the auto-fetch uses bluejay alone (the WebUI beta picker
+# still lists the others for manual experimentation).
+try_beta bluejay && exit 0
+log "beta-repo bluejay fetch failed — falling back to the flashstation crawl"
+
 # ---- 1. flashstation browser key (the only page we still scrape) ----
 # flash.android.com guards the builds API with a referrer-scoped key embedded in
 # its landing HTML. Scrape it; if the page is reshaped/blocked, fall back to the
@@ -201,17 +237,13 @@ fi
 [ -z "$KEY" ] && { KEY="AIzaSyD-bwHpMvFCN3""PfRN4Txsw""_ECg_iptNfMQ"; log "using embedded flashstation key"; }
 [ -z "$KEY" ] && { log "no flashstation key."; exit 1; }
 
-# ---- 2. current Pixel Canary identities: "<device>|<model>" per line ----
-# Update on rebuild as Google's beta lineup rolls forward. Base "Pixel 9" (tokay)
-# is deliberately omitted: Google stopped granting it STRONG even with a valid
-# keybox, so picking it would silently demote the device.
-PIXEL_DEVICES="caiman|Pixel 9 Pro
-komodo|Pixel 9 Pro XL
-tegu|Pixel 9a
-comet|Pixel 9 Pro Fold
-frankel|Pixel 10
-blazer|Pixel 10 Pro
-felix|Pixel Fold"
+# ---- 2. STRONG-capable identities: "<device>|<model>" per line ----
+# Only the Pixel 6 series (launched on Android 12) still earns STRONG — Google
+# cross-checks the claimed first-API level against the real launch OS, so newer
+# Pixels (9/10) are demoted even with a valid keybox. This crawl is a last
+# resort behind the beta-repo fetch above (Pixel 6 has no flashstation canary of
+# its own, so these queries usually miss and the shipped Pixel 6 fallback wins).
+PIXEL_DEVICES="bluejay|Pixel 6a"
 NDEV=$(printf '%s\n' "$PIXEL_DEVICES" | $GREP -c .)
 
 # ---- 3. query builds per product until one yields a canary; bounded tries ----

@@ -28,21 +28,17 @@ use crate::fetch;
 const DEFAULT_OUT: &str = "/data/adb/tricky_store/pif.prop";
 const DEFAULT_MODULE: &str = "/data/adb/modules/tricky_store";
 
-// Current Pixel Canary identities: (device / product-base, model). The
-// flashstation product is `<base>_beta` and Build.DEVICE is `<base>`. All current
-// Pixels share the same canary build, so a random pick here just varies the
-// spoofed identity; each product's own canary is fetched. Base "Pixel 9" (tokay)
-// is intentionally absent — it stopped passing strong attestation even with a
-// valid keybox, so picking it would silently weaken the verdict. Refresh this
-// list as the Pixel beta lineup moves forward.
+// STRONG-capable identities: (device / product-base, model). Only the Pixel 6
+// series (launched on Android 12) still earns STRONG — Google cross-checks the
+// claimed first-API level against the device's real launch OS, so newer Pixels
+// (9 / 10) are demoted even with a valid keybox. NOTE: the shell driver
+// (pif_native_fetch.sh) no longer calls `asfetch autopif` — it fetches these
+// from the public beta repo, since the Pixel 6 series has no flashstation canary
+// of its own. This list is kept consistent for the day flashstation serves them.
 const PIXEL_DEVICES: &[(&str, &str)] = &[
-    ("caiman", "Pixel 9 Pro"),
-    ("komodo", "Pixel 9 Pro XL"),
-    ("tegu", "Pixel 9a"),
-    ("comet", "Pixel 9 Pro Fold"),
-    ("frankel", "Pixel 10"),
-    ("blazer", "Pixel 10 Pro"),
-    ("felix", "Pixel Fold"),
+    // Only bluejay (Pixel 6a) actually holds STRONG in practice; oriole / raven
+    // are demoted despite the same Android 12 launch.
+    ("bluejay", "Pixel 6a"),
 ];
 
 // Referrer-scoped browser key from flash.android.com's landing page. It is
