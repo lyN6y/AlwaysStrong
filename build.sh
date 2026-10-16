@@ -454,6 +454,11 @@ build_variant() {
   local ZIP_SUFFIX="" PIF_REPO="" PIF_TAG="" PIF_ASSET="" PIF_ASSET_FILTER=""
   local PIF_FILES="" PIF_REQUIRED="" PIF_PATCH_PATHS=""
   local PATCH_AUTOPIF4_WGET=0 PIF_ANTITAMPER=0
+  # PIF_CI_URL -> a token-free nightly.link URL to a specific CI artifact, used
+  # when upstream ships the build we want only as an Actions artifact, not a
+  # release (osm0sis PlayIntegrityFork past v18). It pins one run, so the local
+  # build and the release workflow fetch the exact same zip without a token.
+  local PIF_CI_URL=""
   # PIF_NONE=1 -> a PIF-less "Lite" line: TEESimulator/TSOSS attestation + the
   # keybox fetcher only, no PlayIntegrityFork/Fix zygisk. For setups where the
   # bundled PIF conflicts with GMS. build.conf sets PIF_NONE=1 and no PIF pins.
@@ -475,6 +480,8 @@ build_variant() {
   bold ""
   if [[ "$PIF_NONE" == "1" ]]; then
       bold "==> Building the '$VARIANT' line (PIF-less / Lite)"
+  elif [[ -n "$PIF_CI_URL" && -z "$PIF_TAG_OVERRIDE" && -z "$PIF_ASSET_OVERRIDE" ]]; then
+      bold "==> Building the '$VARIANT' line ($PIF_REPO CI build)"
   else
       bold "==> Building the '$VARIANT' line ($PIF_REPO $PIF_TAG)"
   fi
@@ -487,6 +494,16 @@ build_variant() {
       [[ -f "$PIF_FILE" ]] || die "--pif-file not found: $PIF_FILE"
       pif_zip="$PIF_FILE"
       green "    local PIF zip: $PIF_FILE"
+  elif [[ -n "$PIF_CI_URL" && -z "$PIF_TAG_OVERRIDE" && -z "$PIF_ASSET_OVERRIDE" ]]; then
+      # A CI build pinned by a token-free nightly.link URL (see PIF_CI_URL above).
+      # An explicit --pif / --pif-asset / --pif-file still wins over it.
+      pif_zip="$DL/PIF-ci-$VARIANT.zip"
+      if [[ ! -f "$pif_zip" ]]; then
+          bold "==> Downloading $PIF_REPO CI build (nightly.link)"
+          $FETCH "$pif_zip" "$PIF_CI_URL" || die "$PIF_REPO CI download failed: $PIF_CI_URL"
+      else
+          green "    cached: PIF-ci-$VARIANT.zip"
+      fi
   elif [[ ! -f "$pif_zip" ]]; then
       bold "==> Downloading $PIF_REPO $PIF_TAG"
       $FETCH "$pif_zip" "https://github.com/$PIF_REPO/releases/download/$PIF_TAG/$PIF_ASSET" \
