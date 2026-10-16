@@ -73,11 +73,20 @@ jobs:
 
       - name: Release notes from CHANGELOG
         run: |
+          # Lead with the current WebUI screenshots (served from this tag so the
+          # links never drift), then the tag's CHANGELOG section.
+          raw="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/screenshots"
+          {
+            echo "<div align=\"center\">"
+            echo "<img src=\"${raw}/webui.jpg\" width=\"44%\" alt=\"WebUI\"> &nbsp; <img src=\"${raw}/languages.jpg\" width=\"44%\" alt=\"Translated into 15 languages\">"
+            echo "</div>"
+            echo
+          } > RELEASE_NOTES.md
           awk -v v="## ${GITHUB_REF_NAME}" '
             $0==v {f=1; next}
             /^## / {f=0}
             f {print}
-          ' CHANGELOG.md > RELEASE_NOTES.md
+          ' CHANGELOG.md >> RELEASE_NOTES.md
           {
             echo
             echo "---"
