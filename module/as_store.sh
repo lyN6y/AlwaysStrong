@@ -56,15 +56,15 @@ as_init() {
 
 # Every setting there is, in the order the config file lists them.
 AS_KEYS="auto_fp auto_keybox status_indicator rom_spoof_block spoof_patch_props
-         force_patch_props logcat_cleanup prop_unify hide_rom_markers custom_keybox
-         interval_sec"
+         force_patch_props logcat_cleanup prop_unify denylist_gms auto_target hide_rom_markers
+         custom_keybox custom_pif patch_system patch_vendor patch_boot interval_sec"
 
 # What a setting means when nothing has been written. Everything the module does
 # on its own is on; the two opt-ins are off.
 as_default() {
     case "$1" in
-        auto_fp|auto_keybox|status_indicator|rom_spoof_block|spoof_patch_props|logcat_cleanup|prop_unify) echo 1 ;;
-        custom_keybox|force_patch_props|hide_rom_markers) echo 0 ;;
+        auto_fp|auto_keybox|status_indicator|rom_spoof_block|spoof_patch_props|logcat_cleanup|prop_unify|denylist_gms|auto_target) echo 1 ;;
+        custom_keybox|custom_pif|force_patch_props|hide_rom_markers) echo 0 ;;
         interval_sec) echo 3600 ;;
         *) echo "" ;;
     esac
