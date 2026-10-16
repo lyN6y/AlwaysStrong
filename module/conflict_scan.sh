@@ -76,20 +76,20 @@ for c in $CONFLICTS; do
     echo "disabled conflicting module: $c" >> "$LOG" 2>/dev/null
 done
 
-# Shared-id special case: MeowDump's "Integrity Box" ships under the SAME module id
-# as osm0sis PlayIntegrityFork (playintegrityfix, since IB v28). The Lite line keeps
-# playintegrityfix for the plain Build-spoof Fork, but Integrity Box is a full
-# keystore/attestation toolkit that fights the engine — so remove THAT one on every
-# line, told apart by its module.prop (Fork's says osm0sis/PlayIntegrityFork and has
-# no webuiIcon; IB carries MeowDump / Integrity-Box / a webuiIcon).
+# Shared-id special case: a full keystore/attestation toolkit (author MeowDump)
+# ships under the SAME module id as osm0sis PlayIntegrityFork (playintegrityfix).
+# The Lite line keeps playintegrityfix for the plain Build-spoof Fork, but that
+# toolkit fights the engine, so remove THAT one on every line. It is told apart by
+# its module.prop: the real Fork says osm0sis/PlayIntegrityFork with no webuiIcon,
+# the toolkit carries a MeowDump author or a webuiIcon field.
 _ib=/data/adb/modules/playintegrityfix
 if [ -d "$_ib" ] && [ "$SELF_BASENAME" != playintegrityfix ] \
-   && grep -qiE 'MeowDump|Integrity-Box|integrity-box|webuiIcon' "$_ib/module.prop" 2>/dev/null; then
+   && grep -qiE 'MeowDump|webuiIcon|ntegrity.?[Bb]ox' "$_ib/module.prop" 2>/dev/null; then
     touch "$_ib/disable" "$_ib/remove" 2>/dev/null
     [ -f "$_ib/uninstall.sh" ] && sh "$_ib/uninstall.sh" 2>/dev/null
     rm -rf /data/adb/modules_update/playintegrityfix 2>/dev/null
     removed=$((removed + 1))
-    echo "disabled conflicting module: Integrity Box (playintegrityfix)" >> "$LOG" 2>/dev/null
+    echo "disabled conflicting keystore module (playintegrityfix id)" >> "$LOG" 2>/dev/null
 fi
 
 # Tell the caller how many we found, so service.sh can decide whether to log.

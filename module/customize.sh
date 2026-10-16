@@ -62,17 +62,17 @@ for c in $CONFLICT_LIST ; do
   fi
   [ -d "/data/adb/modules_update/$c" ] && rm -rf "/data/adb/modules_update/$c" 2>/dev/null
 done
-# MeowDump's "Integrity Box" ships under the SAME id as osm0sis PlayIntegrityFork
-# (playintegrityfix). The Lite line keeps the plain Fork but must still drop
-# Integrity Box (a full keystore/attestation toolkit) — told apart by module.prop.
+# A full keystore/attestation toolkit (author MeowDump) ships under the SAME id as
+# osm0sis PlayIntegrityFork (playintegrityfix). The Lite line keeps the plain Fork
+# but must still drop that toolkit (it fights the engine), told apart by module.prop.
 _ib=/data/adb/modules/playintegrityfix
 if [ -d "$_ib" ] && [ "$(basename "$_ib")" != "$(basename "$MODPATH")" ] \
-   && grep -qiE 'MeowDump|Integrity-Box|integrity-box|webuiIcon' "$_ib/module.prop" 2>/dev/null; then
+   && grep -qiE 'MeowDump|webuiIcon|ntegrity.?[Bb]ox' "$_ib/module.prop" 2>/dev/null; then
   CONFLICTS=$((CONFLICTS+1))
   [ -f "$_ib/uninstall.sh" ] && sh "$_ib/uninstall.sh" 2>/dev/null || true
   touch "$_ib/disable" "$_ib/remove"
   rm -rf "$_ib" /data/adb/modules_update/playintegrityfix 2>/dev/null
-  ui_print "- removed Integrity Box (shares the playintegrityfix id)"
+  ui_print "- removed a conflicting keystore module (playintegrityfix id)"
 fi
 if [ $CONFLICTS -eq 0 ]; then
   ui_print "no conflicting modules"
@@ -90,14 +90,20 @@ install_file "engine.sh" "$MODPATH"
 for f in module.prop service.sh post-fs-data.sh action.sh \
          uninstall.sh common_func.sh as_store.sh sepolicy.rule \
          keybox_fetch.sh build_target_txt.sh status_fetch.sh description.txt \
-         rom_spoof_block.sh conflict_scan.sh sync_patch.sh \
+         rom_spoof_block.sh conflict_scan.sh sync_patch.sh patch_resolve.sh beta_pif.sh \
+         denylist.sh \
          pif_native_fetch.sh prop_unify.sh logcat_cleanup.sh collect_logs.sh \
-         import_pif.sh reapply_spoof.sh lite_pif_sync.sh reset_defaults.sh \
+         import_pif.sh reapply_spoof.sh reset_defaults.sh \
          pif_fallback_1.prop pif_fallback_2.prop \
          target.txt daemon \
          $ENGINE_FILES ; do
   install_file "$f" "$MODPATH"
 done
+
+# lite_pif_sync.sh is only used on the Lite line (ENGINE=none), where the user's
+# own standalone PIF provides the fingerprint/spoof flags. The Fork/inject lines
+# bundle their own engine and never call it, so it ships in the Lite zip only.
+[ "$ENGINE" = none ] && install_file "lite_pif_sync.sh" "$MODPATH"
 
 # module banner shown by the root manager (module.prop -> banner=.../banner.png)
 if unzip -l "$ZIPFILE" 2>/dev/null | grep -q "^.*banner\.png"; then
