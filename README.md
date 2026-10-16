@@ -10,9 +10,9 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0-orange)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-keyboxstrong-26A5E4?logo=telegram&logoColor=white)](https://t.me/keyboxstrong)
 
-<img src="screenshots/webui.jpg" width="44%" alt="WebUI"> &nbsp; <img src="screenshots/languages.jpg" width="44%" alt="Translated into 15 languages">
+<img src="screenshots/webui.jpg" width="30%" alt="WebUI"> &nbsp; <img src="screenshots/advanced.jpg" width="30%" alt="Advanced"> &nbsp; <img src="screenshots/languages.jpg" width="30%" alt="Translated into 15 languages">
 
-<sub>Built-in WebUI on KernelSU / APatch — hourly auto-update toggles, translated into 15 languages.</sub>
+<sub>Built-in WebUI on KernelSU / APatch: hourly auto-update toggles, an Advanced tab, translated into 15 languages.</sub>
 
 </div>
 
@@ -133,23 +133,13 @@ Everything lives at `/data/adb/tricky_store/` and is reloaded automatically when
 
 `build.sh` downloads the pinned upstream release ZIPs, overlays the glue scripts in `module/`, and produces the installable ZIPs (on Windows run it from WSL or Git Bash). Engines, repo layout, native binaries and the upstream auto-release: **[docs/ADVANCED.md](docs/ADVANCED.md)**.
 
-## Verifying a download
+## Reproducible builds
 
-Nothing in a release is uploaded by hand. `.github/workflows/release.yml` builds the zips
-from the tagged tree on a GitHub runner, and every release carries a `SHA256SUMS.txt` with
-their hashes:
-
-```bash
-sha256sum -c SHA256SUMS.txt   # next to the downloaded zips
-```
-
-The zips ship two compiled binaries, `asfetch` and `aswatcher`. Both are plain Rust with
-their full source in this repo, under `native/asfetch` and `native/watcher`, and neither
-is a third-party blob. Their hashes are listed in the same `SHA256SUMS.txt` as reference
-lines. To confirm those bytes really come from that source, run the **Native binaries**
-workflow from the Actions tab: it rebuilds both from source with a pinned NDK, prints the
-sha256 of the result next to the committed ones, and says whether they match. You can also
-rebuild locally with `scripts/build-asfetch.sh` and `scripts/build-watcher.sh`.
+Nothing in a release is uploaded by hand: `.github/workflows/release.yml` builds the zips
+from the tagged tree on a GitHub runner. The two shipped binaries, `asfetch` and
+`aswatcher`, are plain Rust with full source in this repo under `native/asfetch` and
+`native/watcher`, not third-party blobs. Rebuild them from the **Native binaries** workflow
+on the Actions tab, or locally with `scripts/build-asfetch.sh` and `scripts/build-watcher.sh`.
 
 ## Credits
 
