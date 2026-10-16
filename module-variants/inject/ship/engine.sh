@@ -25,7 +25,7 @@ engine_pif_targets() {
 #   spoofVendingBuild=true   Play Store build spoof (Fork calls this
 #                            spoofVendingFinger).
 # Any of these can be overridden per-key from the WebUI Advanced tab, which
-# writes `key=value` lines into /data/adb/tricky_store/spoof.conf. Some wallet /
+# writes `key=value` lines into /data/adb/tricky_store/alwaysstrong/spoof.conf. Some wallet /
 # banking apps only pass with a flag flipped (e.g. spoofProps=false on a Poco F8
 # Pro). engine_enforce_spoof re-applies these on every boot/hourly pass, so an
 # override in spoof.conf survives — without it a flipped flag would silently
@@ -45,7 +45,8 @@ engine_spoof_defaults() {
 # Effective value for a spoof key: the spoof.conf override if present, else the
 # STRONG default passed in $2.
 engine_spoof_val() {
-    _ov=$(sed -n "s/^$1=//p" "$CONFIG_DIR/spoof.conf" 2>/dev/null | head -1 | tr -d ' \t\r')
+    _ov=$(sed -n "s/^$1=//p" "$CONFIG_DIR/alwaysstrong/spoof.conf" 2>/dev/null | head -1 | tr -d ' \t\r')
+    [ -z "$_ov" ] && _ov=$(sed -n "s/^$1=//p" "$CONFIG_DIR/spoof.conf" 2>/dev/null | head -1 | tr -d ' \t\r')
     [ -n "$_ov" ] && echo "$_ov" || echo "$2"
 }
 
