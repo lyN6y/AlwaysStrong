@@ -193,7 +193,8 @@ section[hidden]{display:none}
 .appitem{display:flex;align-items:center;gap:14px;padding:12px 15px;position:relative;cursor:pointer}
 .appitem+.appitem::before{content:"";position:absolute;left:60px;right:0;top:0;height:1px;background:var(--line)}
 .appitem:active{background:var(--press)}
-.appav{width:36px;height:36px;border-radius:11px;background:var(--field);color:var(--sub);display:grid;place-items:center;flex-shrink:0;font-weight:700;font-size:15px}
+.appav{width:36px;height:36px;border-radius:11px;background:var(--field);color:var(--sub);display:grid;place-items:center;flex-shrink:0;font-weight:700;font-size:15px;overflow:hidden}
+.appav img{width:100%;height:100%;border-radius:inherit;object-fit:cover;display:block}
 .appitem .an{flex:1;min-width:0;display:flex;flex-direction:column}.appitem .an .n{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.appitem .an .p{font-size:11.5px;color:var(--sub);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cb{width:24px;height:24px;border-radius:50%;border:2px solid var(--track);flex-shrink:0;display:grid;place-items:center;color:#fff;transition:background .15s,border-color .15s}
 .cb svg{width:14px;height:14px;opacity:0;transition:opacity .15s}
@@ -974,12 +975,21 @@ section[hidden]{display:none}
   var FORCED={"com.android.vending":1,"com.google.android.gms":1,"com.google.android.gsf":1};
   var EXCLUDE={}; ["com.topjohnwu.magisk","io.github.vvb2060.magisk","io.github.huskydg.magisk","me.weishu.kernelsu","com.rifsxd.ksunext","com.sukisu.ultra","me.bmax.apatch","me.garfieldhan.apatch.next","org.lsposed.manager","com.termux","bin.mt.plus","bin.mt.plus.canary","xzr.konabess","io.github.a13e300.ksuwebui","moe.shizuku.privileged.api","com.dergoogler.mmrl","com.dergoogler.mmrl.wx","org.swiftapps.swiftbackup","com.google.android.apps.maps","com.google.android.apps.translate","com.google.android.apps.youtube.music","com.google.android.keep","com.google.android.youtube","com.google.earth","org.zwanoo.android.speedtest","com.android.chrome"].forEach(function(p){ EXCLUDE[p]=1; });
   var MAPF=AS+"/apps.map", PKGS=AS+"/packages";
-  var apps=[], labels={}, appMap={};
+  var apps=[], labels={}, appMap={}, icons={};
+  // real app icon (KSU-Next WebUI: getPackagesIcons -> base64 data URI, like Tricky-Addon),
+  // else the first letter of the label as a fallback avatar (other managers / no icon).
+  function avatarHtml(p){ return icons[p]
+    ? '<span class="appav"><img src="'+icons[p]+'" alt="" loading="lazy"></span>'
+    : '<span class="appav">'+esc(avatarFor(p,labels[p]))+'</span>'; }
   function specOf(pkg){ var v=appMap[pkg]; if(v==="off") return {off:true}; if(!v) return {kb:"-",mode:FORCED[pkg]?"gen":"auto"}; var b=v.split("|"); return {kb:b[0]||"-",mode:b[1]||"auto"}; }
   function avatarFor(pkg,lbl){ var src=lbl; if(!src){ var parts=String(pkg||"").split("."); src=(parts.length>1?parts[1]:parts[0])||pkg; } src=String(src).replace(/^[^A-Za-z0-9]+/,""); return (src.charAt(0)||"?").toUpperCase(); }
   function loadMap(){ return ksuExec("cat "+shq(MAPF)+" 2>/dev/null").then(function(r){ appMap={}; (r.stdout||"").split("\n").forEach(function(l){ if(!l) return; var i=l.indexOf("\t"); if(i<1) return; appMap[l.slice(0,i).trim()]=l.slice(i+1).trim(); }); }); }
   function saveMap(){ var body=""; Object.keys(appMap).sort().forEach(function(p){ if(appMap[p]) body+=p+"\t"+appMap[p]+"\n"; }); deferBg("mkdir -p "+shq(AS)+" && printf %s "+shq(body)+" > "+shq(MAPF)+"; sh "+shq(MOD+"/build_target_txt.sh")+" "+shq(CFG+"/target.txt")); }
-  function loadApps(){ return ksuExec("{ pm list packages -3; echo com.google.android.gms; echo com.google.android.gsf; echo com.android.vending; cat "+shq(PKGS)+" 2>/dev/null; } 2>/dev/null | sed 's/^package://' | sort -u").then(function(r){ apps=(r.stdout||"").split("\n").map(function(s){ return s.trim(); }).filter(Boolean); labels={}; try{ if(typeof ksu!=="undefined"&&ksu.getPackagesInfo){ var info=JSON.parse(ksu.getPackagesInfo(JSON.stringify(apps))); (info||[]).forEach(function(x){ if(x&&x.packageName) labels[x.packageName]=x.appLabel||""; }); } }catch(e){} }); }
+  function loadApps(){ return ksuExec("{ pm list packages -3; echo com.google.android.gms; echo com.google.android.gsf; echo com.android.vending; cat "+shq(PKGS)+" 2>/dev/null; } 2>/dev/null | sed 's/^package://' | sort -u").then(function(r){ apps=(r.stdout||"").split("\n").map(function(s){ return s.trim(); }).filter(Boolean); labels={}; icons={};
+    try{ if(typeof ksu!=="undefined"&&ksu.getPackagesInfo){ var info=JSON.parse(ksu.getPackagesInfo(JSON.stringify(apps))); (info||[]).forEach(function(x){ if(x&&x.packageName) labels[x.packageName]=x.appLabel||""; }); } }catch(e){}
+    // real app icons (KSU-Next only; other managers lack it, so fall back to letters)
+    try{ if(typeof ksu!=="undefined"&&ksu.getPackagesIcons){ var ics=JSON.parse(ksu.getPackagesIcons(JSON.stringify(apps),48)); (ics||[]).forEach(function(x){ if(x&&x.packageName&&x.icon) icons[x.packageName]=x.icon; }); } }catch(e){}
+    }); }
   // mode is shown by the tick colour (like Tricky-Addon), so the badge carries
   // only a non-default keybox name, never the mode.
   function appBadge(pkg){ var s=specOf(pkg); if(s.off||!s.kb||s.kb==="-") return ""; return '<span class="badge">'+esc(s.kb.replace(/\.xml$/i,""))+'</span>'; }
@@ -993,7 +1003,7 @@ section[hidden]{display:none}
     }
     if(!list.length&&!html){ appsList.innerHTML='<div class="card"><div class="empty" style="display:block">'+esc(tr("t_no_apps","No apps"))+'</div></div>'; return; }
     list.forEach(function(p){ var s=specOf(p); var lbl=labels[p]||p; var cls="appitem"; if(!s.off){ cls+=" on"; if(s.mode==="gen") cls+=" gen"; else if(s.mode==="hack") cls+=" hack"; }
-      html+='<div class="'+cls+'" data-pkg="'+esc(p)+'"><span class="appav">'+esc(avatarFor(p,labels[p]))+'</span><span class="an"><span class="n">'+esc(lbl)+'</span><span class="p">'+esc(p)+'</span></span>'+appBadge(p)+'<span class="cb">'+CHK2+'</span></div>';
+      html+='<div class="'+cls+'" data-pkg="'+esc(p)+'">'+avatarHtml(p)+'<span class="an"><span class="n">'+esc(lbl)+'</span><span class="p">'+esc(p)+'</span></span>'+appBadge(p)+'<span class="cb">'+CHK2+'</span></div>';
     });
     appsList.innerHTML='<div class="card">'+html+'</div>';
   }
