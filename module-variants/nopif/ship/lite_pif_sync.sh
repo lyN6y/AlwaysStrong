@@ -17,7 +17,7 @@
 #      regenerated from that fingerprint, then the PIF is restarted.
 #
 # The module id `playintegrityfix` is shared: osm0sis PlayIntegrityFork, chiteroman/
-# KOWX712 PlayIntegrityFix inject-s, AND squatters like MeowDump's Integrity Box all
+# KOWX712 PlayIntegrityFix inject-s, AND id-squatting keystore toolkits (MeowDump) all
 # use it. We ONLY sync the two real Fix/Fork variants (told apart for their differing
 # flag names); anything else is left completely alone. Prints the kind on success
 # ("OK fork" / "OK inject") so callers can report it; silent no-op otherwise.
@@ -35,8 +35,8 @@ grep -q '^ENGINE=none' "$MODDIR/engine.sh" 2>/dev/null || exit 0
 _mp="$PIF_DIR/module.prop"
 _id="$(grep -m1 '^name=' "$_mp" 2>/dev/null)$(grep -m1 '^updateJson=' "$_mp" 2>/dev/null)$(grep -m1 '^author=' "$_mp" 2>/dev/null)"
 PIF_KIND=""
-# Integrity Box (MeowDump) & co. squat the shared `playintegrityfix` id but are
-# NOT a real Fix/Fork we may touch. Reject them via a FULL module.prop scan — the
+# Id-squatting keystore toolkits (MeowDump) & co. squat the shared `playintegrityfix`
+# id but are NOT a real Fix/Fork we may touch. Reject them via a FULL module.prop scan; the
 # `webuiIcon=` tell lives on its own line, not among the name/updateJson/author
 # fields that _id samples, so a case on _id alone would miss it (matching the
 # sibling scanners in customize.sh / conflict_scan.sh).

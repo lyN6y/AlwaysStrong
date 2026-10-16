@@ -73,7 +73,17 @@ engine_install_pif() {
     [ -f "$MODPATH/migrate.sh" ] || return 1
     cp -f "$_src" "$MODPATH/pif.prop" 2>/dev/null
     rm -f "$MODPATH/custom.pif.prop" "$MODPATH/custom.pif.json" 2>/dev/null
-    sh "$MODPATH/migrate.sh" -i -a "$MODPATH/pif.prop" >/dev/null 2>&1
+    # A file that already carries the migrated System-Properties lines
+    # (*api_level / *.build.id) is a finished custom.pif.prop. Upstream
+    # migrate.sh refuses exactly that ("No migration required" -> exit 1,
+    # writes nothing), which surfaced as "engine rejected the fingerprint"
+    # for any completed custom.pif.prop the user imported. Use it as-is; only
+    # run migrate.sh to convert a raw pif.prop/json that lacks those lines.
+    if grep -qE '^[[:space:]]*#?[[:space:]]*\*(api_level|\.build\.id)=' "$MODPATH/pif.prop" 2>/dev/null; then
+        cp -f "$MODPATH/pif.prop" "$MODPATH/custom.pif.prop" 2>/dev/null
+    else
+        sh "$MODPATH/migrate.sh" -i -a "$MODPATH/pif.prop" >/dev/null 2>&1
+    fi
     [ -s "$MODPATH/custom.pif.prop" ] || return 1
     # migrate.sh writes spoofProvider=1 / spoofVendingFinger=0, a WEAK config
     # that breaks STRONG. Enforce here so every caller is correct without
