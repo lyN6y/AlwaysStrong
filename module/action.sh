@@ -35,7 +35,15 @@ unset ASH_STANDALONE
 # skip them to reach STRONG as soon as the device is up. Every sleep in this
 # script is UI-only (fetches are bounded by `timeout`, not sleep), and the helper
 # scripts it calls run in their own `sh` and keep their real retry delays.
-if [ "${AS_FAST:-0}" = "1" ]; then sleep() { :; }; fi
+if [ "${AS_FAST:-0}" = "1" ]; then
+    sleep() { :; }
+else
+    # Manual WebUI/terminal tap: the per-step sleeps below are only cosmetic
+    # progress pacing and add up to ~12s of pure idle between the fast steps.
+    # Cap each to a fraction of a second so Action feels responsive. The real
+    # fetches are bounded by `timeout`, not sleep, so this never cuts short work.
+    sleep() { command sleep 0.2 >/dev/null 2>&1 || :; }
+fi
 
 # `action.sh logs` — dump a diagnostic bundle for a GitHub issue and exit.
 if [ "$1" = "logs" ] && [ -x "$MODPATH/collect_logs.sh" ]; then

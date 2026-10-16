@@ -802,11 +802,15 @@ section[hidden]{display:none}
 
   // ======================= bindings =======================
   // Automatic
+  // Return to automatic fingerprint: the exact reset the Import-row trash does
+  // (clear custom pif, drop the imported/beta name, reset the Import row, hide the
+  // trash), so turning the Fingerprint toggle back ON also deletes the selected pif.
   function pifClear(){ setting("auto_fp",1); setting("custom_pif",0);
     deferBg("sh "+shq(STORE)+" state-del pif_name; sh "+shq(STORE)+" state-del pif_model");
-    qa("#betaAcc .beta").forEach(function(x){ x.classList.remove("sel"); }); }
+    qa("#betaAcc .beta").forEach(function(x){ x.classList.remove("sel"); });
+    setImpRowSel("",""); var id=document.getElementById("impDel"); if(id) id.hidden=true; }
   var fpI=dkInput("fingerprint pixel refresh");
-  if(fpI) fpI.addEventListener("change",function(e){ if(e.target.checked) pifClear(); else setting("auto_fp",0); });
+  if(fpI) fpI.addEventListener("change",function(e){ if(e.target.checked){ pifClear(); toast(tr("t_back_fp","Back to automatic fingerprint"),2500); } else setting("auto_fp",0); });
   var kbI=dkInput("keybox auto check");
   if(kbI) kbI.addEventListener("change",function(e){ settingOn("auto_keybox",e.target.checked); });
   var indI=dkInput("status indicator prefix");
@@ -930,11 +934,8 @@ section[hidden]{display:none}
   });
   // trash: drop the imported / beta fingerprint -> back to automatic
   if(impDel) impDel.addEventListener("click",function(e){ e.stopPropagation();
-    setting("auto_fp",1); setting("custom_pif",0);
-    deferBg("sh "+shq(STORE)+" state-del pif_name; sh "+shq(STORE)+" state-del pif_model");
     var fp=dkInput("fingerprint pixel refresh"); if(fp) fp.checked=true;
-    qa("#betaAcc .beta").forEach(function(x){ x.classList.remove("sel"); });
-    setImpRowSel("",""); impDel.hidden=true; toast(tr("t_back_fp","Back to automatic fingerprint"),3000);
+    pifClear(); toast(tr("t_back_fp","Back to automatic fingerprint"),3000);
   });
   function pifPoll(name,tries){
     ksuExec('echo "n=$(sh '+shq(STORE)+' state-get pif_name)"; echo "m=$(sh '+shq(STORE)+' state-get pif_model)"').then(function(r){
@@ -945,25 +946,41 @@ section[hidden]{display:none}
     });
   }
 
-  // ---- Beta Pixel fingerprints (Advanced accordion, static set from the mock) ----
-  var BETA_MODELS={bluejay:"Pixel 6a",oriole:"Pixel 6",raven:"Pixel 6 Pro",husky:"Pixel 8 Pro",komodo:"Pixel 9 Pro XL"};
+  // ---- Beta Pixel fingerprints (Advanced accordion) ----
+  // The list is fetched live from the canary-miner repo (beta_pif.sh list) on the
+  // first open, so new devices appear automatically; it falls back to the full
+  // known set when offline. Picking one imports it as a custom pif.
+  var BETA_MODELS={akita:"Pixel 8a",blazer:"Pixel 10 Pro",bluejay:"Pixel 6a",caiman:"Pixel 9 Pro",cheetah:"Pixel 7 Pro",comet:"Pixel 9 Pro Fold",felix:"Pixel Fold",frankel:"Pixel 10",husky:"Pixel 8 Pro",komodo:"Pixel 9 Pro XL",lynx:"Pixel 7a",mustang:"Pixel 10 Pro XL",oriole:"Pixel 6",panther:"Pixel 7",rango:"Pixel 10 Pro Fold",raven:"Pixel 6 Pro",shiba:"Pixel 8",stallion:"Pixel 10a",tangorpro:"Pixel Tablet",tegu:"Pixel 9a",tokay:"Pixel 9"};
+  // Only Android 12-launch Pixels (the 6 series) still reach STRONG via keybox attestation.
+  var BETA_STRONG={bluejay:1,oriole:1,raven:1};
   var betaHead=document.getElementById("betaHead"),betaAcc=document.getElementById("betaAcc");
+  var betaBusy=false, betaLoaded=false;
+  function betaCurCode(){ var pn=(__lastS&&__lastS.pif_name)||""; var m=pn.match(/^([A-Za-z0-9_]+)\.pif\.prop$/); return m?m[1]:""; }
+  function betaRow(code){ var m=BETA_MODELS[code]||code, sel=betaCurCode()===code;
+    return '<div class="beta'+(sel?" sel":"")+'" data-c="'+esc(code)+'"><div class="bn"><div class="m">'+esc(m)+'</div><div class="c">'+esc(code)+'</div></div>'+(BETA_STRONG[code]?'<span class="badge">STRONG</span>':'')+'<span class="ck">'+CHK2+'</span></div>'; }
+  function betaRender(codes){ if(!betaAcc) return; betaAcc.innerHTML=codes.map(betaRow).join("");
+    if(betaHead&&betaHead.classList.contains("open")) betaAcc.style.maxHeight=betaAcc.scrollHeight+"px"; }
+  function betaLoad(){ if(betaLoaded) return; betaLoaded=true;
+    ksuExec("sh "+shq(MOD+"/beta_pif.sh")+" list").then(function(r){
+      var codes=(r.stdout||"").split("\n").map(function(s){ return s.trim(); }).filter(function(c){ return /^[A-Za-z0-9_]+$/.test(c); });
+      if(!codes.length){ betaLoaded=false; codes=Object.keys(BETA_MODELS); }
+      else codes.sort(function(a,b){ return (BETA_MODELS[a]||a).localeCompare(BETA_MODELS[b]||b); });
+      betaRender(codes);
+    }); }
   if(betaHead&&betaAcc){
-    betaHead.addEventListener("click",function(){ var o=betaHead.classList.toggle("open"); betaAcc.style.maxHeight=o?betaAcc.scrollHeight+"px":"0px"; });
-    var betaBusy=false;
-    qa(".beta",betaAcc).forEach(function(b){ b.addEventListener("click",function(){
+    betaHead.addEventListener("click",function(){ var o=betaHead.classList.toggle("open"); if(o) betaLoad(); betaAcc.style.maxHeight=o?betaAcc.scrollHeight+"px":"0px"; });
+    // delegated: the rows are rendered dynamically after the list fetch
+    betaAcc.addEventListener("click",function(e){ var b=e.target&&e.target.closest?e.target.closest(".beta[data-c]"):null; if(!b) return;
       if(betaBusy) return; var code=b.dataset.c; if(!code) return; betaBusy=true;
       qa(".beta",betaAcc).forEach(function(x){ x.classList.remove("sel"); }); b.classList.add("sel");
       deferBg("sh "+shq(MOD+"/beta_pif.sh")+" get "+shq(code));
       setting("auto_fp",0); setting("custom_pif",1);
       var fp=dkInput("fingerprint pixel refresh"); if(fp) fp.checked=false;
-      var label=BETA_MODELS[code]||code;
-      setHeroModel(label);
-      if(impDel) impDel.hidden=false;
-      setImpRowSel(label,code+".pif.prop");
+      var label=BETA_MODELS[code]||code; setHeroModel(label);
+      if(impDel) impDel.hidden=false; setImpRowSel(label,code+".pif.prop");
       toast(tr("t_applying","Applying")+" "+label+"…",3500);
       setTimeout(function(){ betaBusy=false; },1200);
-    }); });
+    });
   }
 
   // ---- Target apps: real installed list, per-app tick + mode + keybox ----
