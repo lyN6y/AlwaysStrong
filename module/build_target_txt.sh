@@ -62,13 +62,34 @@ is_installed() { printf '%s\n' "$ALL" | grep -Fxq "$1"; }
 # "cert-generating" mode — is applied per app below, from the forced defaults and
 # the WebUI overrides, so it lives in exactly one place.
 build_default() {
-    pm list packages -3 2>/dev/null \
-        | sed 's/^package://' \
-        | grep -Fxv -e com.android.vending \
-                    -e com.google.android.gms \
-                    -e com.google.android.gsf
-    for p in $OEM_LIST;    do is_installed "$p" && echo "$p"; done
+    # Auto targeting (default on): add every user-installed app and the curated
+    # OEM wallet/store apps. Off (auto_target=0, WebUI "Auto targeting") keeps
+    # ONLY the forced Google trio plus the user's own custom packages / per-app
+    # map, so a user who curates the list by hand is not flooded with every app.
+    if ! command -v as_on >/dev/null 2>&1 || as_on auto_target; then
+        pm list packages -3 2>/dev/null \
+            | sed 's/^package://' \
+            | grep -Fxv -e com.android.vending \
+                        -e com.google.android.gms \
+                        -e com.google.android.gsf
+        for p in $OEM_LIST; do is_installed "$p" && echo "$p"; done
+    fi
     for p in $FORCED_LIST; do is_installed "$p" && echo "$p"; done
+    # user-added custom packages (WebUI "Add custom package", stored in
+    # alwaysstrong/packages). These are often system / pre-installed apps that
+    # `pm list -3` never reports, so without reading this file a manually added
+    # package showed ticked in the WebUI yet never landed in target.txt and was
+    # lost on every rebuild (boot / Action / watcher). Emit them as plain names
+    # (the forced trio is already added above, so strip it); the per-app map
+    # below still applies their keybox / mode / off exactly like any other app.
+    _pk="${AS_PKGS:-$AS_CFG_ROOT/alwaysstrong/packages}"
+    if [ -f "$_pk" ]; then
+        sed 's/[[:space:]]//g' "$_pk" 2>/dev/null \
+            | grep -vE '^(#|$)' \
+            | grep -Fxv -e com.android.vending \
+                        -e com.google.android.gms \
+                        -e com.google.android.gsf
+    fi
 }
 
 DEF=$(build_default | sort -u)
