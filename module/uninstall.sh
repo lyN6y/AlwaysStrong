@@ -19,6 +19,16 @@ killall -9 com.google.android.gms.unstable 2>/dev/null
 killall -9 com.google.android.gms 2>/dev/null
 am force-stop com.android.vending 2>/dev/null
 
+# Remove the DenyList entries we added (entries only, never the enforcement
+# toggle). Only on Magisk; rm by package drops all of that package's processes.
+if command -v magisk >/dev/null 2>&1; then
+    for p in com.android.vending com.google.android.gms com.google.android.gsf \
+             com.google.android.gm com.anu.developers3k.rootchecker \
+             gr.nikolasspyr.integritycheck io.github.vvb2060.keyattestation; do
+        magisk --denylist rm "$p" >/dev/null 2>&1
+    done
+fi
+
 # Our settings, state and logs (one directory since 1.0.5)
 rm -rf "$CONFIG_DIR/alwaysstrong"
 
@@ -26,6 +36,13 @@ rm -rf "$CONFIG_DIR/alwaysstrong"
 rm -rf "$CONFIG_DIR/persistent_keys"
 rm -f "$CONFIG_DIR/tee_status.txt"
 rm -f "$CONFIG_DIR/boot_hash.bin" "$CONFIG_DIR/boot_key.bin"
+
+# JingMatrix TEESimulator data dir: drop the config, the root-of-trust override
+# and the harvested record we generated so a reinstall (or a switch to another
+# engine) starts clean and re-harvests instead of reusing a stale zeroed key.
+# keybox.xml there is a symlink into tricky_store and is left alone.
+rm -f /data/adb/teesim/config.json /data/adb/teesim/overrides.json \
+      /data/adb/teesim/harvested.json 2>/dev/null
 
 # Global PIF prop we dropped for the TEE PatchLevelManager (sync_patch.sh)
 rm -f /data/adb/pif.prop
@@ -36,7 +53,7 @@ rm -f /data/adb/pif.prop
 # the "Lite" line depends on that separate module). Never delete the user's real
 # module on uninstall: on the Lite line (ENGINE=none) the folder is always theirs,
 # and on any line a folder whose module.prop identifies a real Fork / Fix inject-s
-# / Integrity Box is theirs too. Only remove a folder that is clearly not a live
+# / id-squatting keystore toolkit is theirs too. Only remove a folder that is clearly not a live
 # third-party module (a true leftover shim with no recognizable module.prop).
 PIF_MOD=/data/adb/modules/playintegrityfix
 if [ -d "$PIF_MOD" ]; then
