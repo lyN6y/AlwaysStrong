@@ -34,6 +34,9 @@ esac
 mkdir -p "$AS_LOGS" 2>/dev/null
 rm -f "$AS_CONF" "$AS_SPOOF" "$AS_PKGS" 2>/dev/null
 as_seed
+# custom_pif is back at its default (off), so the Action below fetches a fresh
+# fingerprint over any imported one, dropping the now-stale imported-pif name too.
+command -v st_del >/dev/null 2>&1 && { st_del pif_name; st_del pif_model; }
 # the interval is back at its default too, so tell the refresh loop - it is
 # otherwise still waiting out whatever was set before the reset
 as_notify
