@@ -135,6 +135,11 @@ done
 #   Opt-in:  hide_rom_markers=1 in alwaysstrong/config
 as_on hide_rom_markers && \
     resetprop --delete init.svc.vendor.lineage_health 2>/dev/null
+
+# --- DenyList: add the Google Play stack (entries only; never enforcement) ---
+# Runs after boot_completed so the packages are registered. denylist.sh is a
+# no-op unless denylist_gms is on, the manager is Magisk, and enforcement is off.
+[ -f "$MODDIR/denylist.sh" ] && sh "$MODDIR/denylist.sh" 2>/dev/null
 }&
 
 # --- Conflict re-scan on every boot ---
@@ -214,21 +219,46 @@ fi
 } &
 
 # --- VBMeta digest (deferred, bounded) ---
-# Reading the whole vbmeta partition during early boot can hang the boot
-# animation on some Xiaomi devices. Skip if already set, only read 64KiB.
+# After a bootloader unlock ro.boot.vbmeta.digest reads 0000…, which boot-hash
+# detectors flag. Resolve a valid 64-hex digest with a priority chain (the idea
+# borrowed from Specter's boot-hash resolver — minus its random fallback, which
+# fails any baseline check and can't be reproduced):
+#   1. a valid non-zero value the bootloader already reports -> keep it (real).
+#   2. our cached value (state key 'boot_hash') -> stable across boots, and skips
+#      re-reading the partition (that read can stall early boot on some Xiaomis).
+#   3. sha256 of the vbmeta partition -> deterministic from THIS device, so it is
+#      stable every boot; computed once, then cached.
 {
 sleep 60
-CURRENT_DIGEST=$(resetprop ro.boot.vbmeta.digest)
-if [ -z "$CURRENT_DIGEST" ] || echo "$CURRENT_DIGEST" | grep -qE '^0+$'; then
-    for p in /dev/block/by-name/vbmeta /dev/block/by-name/vbmeta_a /dev/block/bootdevice/by-name/vbmeta; do
-        [ -e "$p" ] && VBMETA_BLK="$p" && break
-    done
-    if [ -n "$VBMETA_BLK" ]; then
-        DIGEST=$(dd if="$VBMETA_BLK" bs=4096 count=16 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1)
-        if [ -n "$DIGEST" ]; then
-            resetprop -n ro.boot.vbmeta.digest "$DIGEST"
-            log -t "AlwaysStrong" "VBMeta digest set: ${DIGEST:0:16}..."
+_valid_hash() {   # 64 hex chars, not all zero
+    case "$1" in ''|*[!0-9a-fA-F]*) return 1 ;; esac
+    [ "${#1}" -eq 64 ] || return 1
+    case "$1" in *[!0]*) return 0 ;; *) return 1 ;; esac
+}
+_cur=$(resetprop ro.boot.vbmeta.digest 2>/dev/null | tr 'A-F' 'a-f' | tr -d ' \t\r\n')
+if ! _valid_hash "$_cur"; then
+    _bh=""
+    if command -v st_get >/dev/null 2>&1; then
+        _cached=$(st_get boot_hash | tr 'A-F' 'a-f' | tr -d ' \t\r\n')
+        _valid_hash "$_cached" && _bh="$_cached"
+    fi
+    if [ -z "$_bh" ]; then
+        for p in /dev/block/by-name/vbmeta /dev/block/by-name/vbmeta_a /dev/block/bootdevice/by-name/vbmeta; do
+            [ -e "$p" ] && VBMETA_BLK="$p" && break
+        done
+        if [ -n "$VBMETA_BLK" ]; then
+            _calc=$(dd if="$VBMETA_BLK" bs=4096 count=16 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1 | tr -d ' \t\r\n')
+            _valid_hash "$_calc" && _bh="$_calc"
         fi
+    fi
+    if _valid_hash "$_bh"; then
+        command -v st_set >/dev/null 2>&1 && st_set boot_hash "$_bh"
+        resetprop -n ro.boot.vbmeta.digest "$_bh"
+        log -t "AlwaysStrong" "VBMeta digest set: $(printf '%s' "$_bh" | cut -c1-16)... (resolved)"
+        # The digest is the TEESimulator verifiedBootHash override. The daemon
+        # harvested before this resolved, so push a fresh config/override now
+        # instead of waiting for the hourly tick (no-op on the other engines).
+        [ "$ATTEST" = teesim ] && command -v teesim_gen_config >/dev/null 2>&1 && teesim_gen_config
     fi
 fi
 }&
@@ -331,6 +361,7 @@ fi
 # --- Hourly refresh (fingerprint + keybox, each toggle-able from WebUI) --
 # The WebUI writes the switches into alwaysstrong/config:
 #   auto_fp=0      -> skip the fingerprint refresh
+#   custom_pif=1   -> user imported a pif; never fetch over it
 #   auto_keybox=0  -> skip the keybox fetch
 # Keybox-only restarts PI when it actually changed (exit 0); fingerprint
 # updates are picked up naturally on the next PI invocation, so we don't
@@ -388,7 +419,7 @@ fi
             RESET=0          # interval changed: drop this wait, start the new one now
             continue
         fi
-        if as_on auto_fp && [ "${ENGINE:-none}" != "none" ]; then
+        if ! as_on custom_pif && as_on auto_fp && [ "${ENGINE:-none}" != "none" ]; then
             FP_DONE=0
             if [ -x "$MODDIR/pif_native_fetch.sh" ]; then
                 sh "$MODDIR/pif_native_fetch.sh" >"$AS_LOGS/autopif.log" 2>&1 && FP_DONE=1

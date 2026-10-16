@@ -67,10 +67,25 @@ teesim_gen_config() {
     _device=$(_pget DEVICE)
     _product=$(_pget PRODUCT)
     _patch=$(_pget SECURITY_PATCH)
+    # The attested patch is the fingerprint's own SECURITY_PATCH, stamped on all
+    # three partitions — NOT bumped to the current month (that would mismatch the
+    # Pixel fingerprint and drop STRONG), and matching what sync_patch.sh writes
+    # to the ro.*.security_patch props. The upstream "today"/"YYYY-MM-05" tokens
+    # are only a fallback when the pif carries no valid SECURITY_PATCH.
+    [ -f "$_md/patch_resolve.sh" ] && . "$_md/patch_resolve.sh"
     case "$_patch" in
         [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) _sys="$_patch" ;;
         *) _sys="today" ;;
     esac
+    # Per-partition manual overrides from the WebUI (System/Vendor/Boot, empty =
+    # the fingerprint date _sys). Lets the user set e.g. an older vendor patch
+    # deliberately; with nothing set all three stay identical.
+    _psys="$_sys"; _pven="$_sys"; _pboot="$_sys"
+    if command -v pr_partition >/dev/null 2>&1 && command -v as_get >/dev/null 2>&1; then
+        _psys=$(pr_partition "$(as_get patch_system)" "$_sys")
+        _pven=$(pr_partition "$(as_get patch_vendor)" "$_sys")
+        _pboot=$(pr_partition "$(as_get patch_boot)" "$_sys")
+    fi
 
     # --- target apps from target.txt --------------------------------------
     # target.txt is TrickyStore's format, NOT TEESimulator's. It carries syntax
@@ -110,6 +125,83 @@ teesim_gen_config() {
     done
     _apps=$(printf '%s' "$_apps" | sed '$ s/,$//')   # drop the trailing comma
 
+    # --- root of trust: force a locked/Verified boot with a non-zero key+hash --
+    # TEESimulator attests the device's REAL harvested root of trust: it derives
+    # verifiedBootKey from ro.boot.vbmeta.public_key_digest and verifiedBootHash
+    # from ro.boot.vbmeta.digest, and reads the lock state off the real TEE key.
+    # On an UNLOCKED bootloader all of those are zero/false, so it attests a zeroed
+    # ORANGE root of trust and Play Integrity never reaches STRONG. That is exactly
+    # the "bootloader unlock status, verifiedBootKey and verifiedBootHash all zero"
+    # report. Unlike TEESimulator-RS / TrickyStoreOSS the daemon does NOT trust the
+    # ro.boot.* lock props we pin in service.sh, and once it has harvested a key it
+    # PERSISTS that key ("KEK stability"), so pinning a prop afterwards can't undo an
+    # already-zero harvest. Its own fix for this is the override layer at
+    # overrides.json, which is merged on top of the harvest and always wins; that is
+    # the file the stock WebUI writes when a user edits an all-zero boot key/hash.
+    # AlwaysStrong ships its own WebUI, so we populate it here.
+    _ov="$TEESIM_DATA/overrides.json"
+    _hex64() {   # 64 lowercase hex chars, not all zero
+        case "$1" in ''|*[!0-9a-f]*) return 1 ;; esac
+        [ "${#1}" -eq 64 ] || return 1
+        case "$1" in *[!0]*) return 0 ;; *) return 1 ;; esac
+    }
+    _clean() { printf '%s' "$1" | tr 'A-F' 'a-f' | tr -d ' \t\r\n:'; }
+
+    # verifiedBootHash: the same deterministic ro.boot.vbmeta.digest service.sh pins
+    # (recovered from the cached boot_hash when the live prop is still zero early in
+    # boot). Omitted when not yet resolvable -- the daemon then computes the vbmeta
+    # digest from the partitions itself, which is non-zero.
+    _vbh=""
+    command -v resetprop >/dev/null 2>&1 && _vbh=$(_clean "$(resetprop ro.boot.vbmeta.digest 2>/dev/null)")
+    _hex64 "$_vbh" || _vbh=""
+    if [ -z "$_vbh" ] && command -v st_get >/dev/null 2>&1; then
+        _c=$(_clean "$(st_get boot_hash)"); _hex64 "$_c" && _vbh="$_c"
+    fi
+
+    # verifiedBootKey: a locked GREEN boot carries a real key digest, never zeros.
+    # Keep a genuine non-zero public_key_digest if the bootloader already reports one
+    # (a really-locked device); otherwise derive a device-stable value from the active
+    # fingerprint and cache it so it never changes across boots (KEK stability). Play
+    # does not verify this value against a known OEM key -- it only has to be present,
+    # 32 bytes and consistent -- so a stable synthetic digest is sufficient for STRONG.
+    _vbk=""
+    command -v st_get >/dev/null 2>&1 && _vbk=$(_clean "$(st_get teesim_vbk)")
+    _hex64 "$_vbk" || _vbk=""
+    if [ -z "$_vbk" ] && command -v resetprop >/dev/null 2>&1; then
+        _p=$(_clean "$(resetprop ro.boot.vbmeta.public_key_digest 2>/dev/null)")
+        _hex64 "$_p" && _vbk="$_p"
+    fi
+    if [ -z "$_vbk" ]; then
+        _seed="$_fp"; [ -n "$_seed" ] || _seed="${_model}${_device}"; [ -n "$_seed" ] || _seed="alwaysstrong-teesim"
+        _vbk=$(printf 'AlwaysStrong-vbk:%s' "$_seed" | sha256sum 2>/dev/null | cut -c1-64)
+        _vbk=$(_clean "$_vbk"); _hex64 "$_vbk" || _vbk=""
+    fi
+    [ -n "$_vbk" ] && command -v st_set >/dev/null 2>&1 && st_set teesim_vbk "$_vbk"
+
+    # Pin ro.boot.vbmeta.public_key_digest to the same value so a FUTURE harvest (and
+    # the other engines that read the prop) see a non-zero key too. Only when it would
+    # change, so a device that already carries a genuine digest keeps it.
+    if [ -n "$_vbk" ] && command -v resetprop >/dev/null 2>&1; then
+        [ "$(_clean "$(resetprop ro.boot.vbmeta.public_key_digest 2>/dev/null)")" = "$_vbk" ] ||
+            resetprop -n ro.boot.vbmeta.public_key_digest "$_vbk" 2>/dev/null
+    fi
+
+    # Write overrides.json: force Verified(0) + locked, and supply the non-zero
+    # key/hash. deviceLocked / verifiedBootState are the daemon's own forced fields
+    # (it ignores them here if it force-sets them already); the key and hash are the
+    # editable override it exists for. Written atomically so the daemon's data-dir
+    # watcher re-merges and re-pushes cleanly.
+    mkdir -p "$TEESIM_DATA" 2>/dev/null
+    {
+        printf '{\n'
+        printf '  "deviceLocked": true,\n'
+        printf '  "verifiedBootState": 0'
+        [ -n "$_vbk" ] && printf ',\n  "verifiedBootKey": "%s"' "$_vbk"
+        [ -n "$_vbh" ] && printf ',\n  "verifiedBootHash": "%s"' "$_vbh"
+        printf '\n}\n'
+    } > "$_ov.tmp" 2>/dev/null && mv -f "$_ov.tmp" "$_ov" 2>/dev/null
+    chmod 0600 "$_ov" 2>/dev/null
+
     # mode=generation: mint the whole key in software under the keybox. "patch"
     # keeps the real hardware key and only re-signs its attestation — fewer
     # detection points, but it needs a working hardware KeyMint level. Many custom
@@ -124,7 +216,7 @@ teesim_gen_config() {
     "default": {
       "keybox": "keybox.xml",
       "mode": "generation",
-      "patchLevel": { "system": "$_sys", "vendor": "YYYY-MM-05", "boot": "YYYY-MM-05" },
+      "patchLevel": { "system": "$_psys", "vendor": "$_pven", "boot": "$_pboot" },
       "osVersion": "harvested",
       "brand": "$_brand",
       "device": "$_device",

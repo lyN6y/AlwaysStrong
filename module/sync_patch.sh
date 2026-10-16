@@ -23,10 +23,17 @@ CONFIG_DIR=/data/adb/tricky_store
 MODE="${1:-}"
 
 # --- find the dotted patch (YYYY-MM-DD) from a pif file -------------------
+# The engine's ACTIVE pif lives in the module dir ($MODPATH): engine_install_pif
+# writes custom.pif.prop (Fork) / pif.prop (inject-s) there for every source —
+# auto-fetch, beta pick and Import alike. The $CONFIG_DIR copies are secondary:
+# $CONFIG_DIR/pif.prop is only the last *auto-fetch* written by pif_native_fetch,
+# so after an Import / beta pick it is STALE (a different device + patch) and must
+# NOT win, or the attested patch (and the RS /data/adb/pif.prop below) would come
+# from the old auto-fetch instead of the imported fingerprint. Module dir first.
 SP=""
 SRC=""
-for f in "$CONFIG_DIR/custom.pif.prop" "$CONFIG_DIR/pif.prop" \
-         "$MODPATH/custom.pif.prop" "$MODPATH/pif.prop"; do
+for f in "$MODPATH/custom.pif.prop" "$MODPATH/pif.prop" \
+         "$CONFIG_DIR/custom.pif.prop" "$CONFIG_DIR/pif.prop"; do
     [ -s "$f" ] || continue
     SP=$(grep -m1 '^SECURITY_PATCH=' "$f" | cut -d= -f2- | tr -d ' "'\''\r')
     [ -n "$SP" ] && { SRC="$f"; break; }
@@ -58,59 +65,65 @@ RAW=$(echo "$SP" | tr -cd '0-9')
 PACKED="$RAW"
 DOT="$(echo "$RAW" | cut -c1-4)-$(echo "$RAW" | cut -c5-6)-$(echo "$RAW" | cut -c7-8)"
 
+# The attested patch is the ACTIVE FINGERPRINT's own SECURITY_PATCH (DOT, read
+# from the pif above). It is NOT bumped to the current month — a Pixel
+# fingerprint claims a specific patch, and pushing past it makes the props and
+# the attestation disagree and drops STRONG. Per-partition manual overrides from
+# the WebUI (System / Vendor / Boot, empty = the fingerprint date) sit on top.
+SYS="$DOT"; VEN="$DOT"; BOOT="$DOT"
+MAN_SYS=""; MAN_VEN=""; MAN_BOOT=""
+if [ -f "$MODPATH/patch_resolve.sh" ]; then
+    . "$MODPATH/patch_resolve.sh"
+    if command -v as_get >/dev/null 2>&1; then
+        MAN_SYS=$(as_get patch_system); MAN_VEN=$(as_get patch_vendor); MAN_BOOT=$(as_get patch_boot)
+    fi
+    SYS=$(pr_partition "$MAN_SYS" "$DOT")
+    VEN=$(pr_partition "$MAN_VEN" "$DOT")
+    BOOT=$(pr_partition "$MAN_BOOT" "$DOT")
+fi
+
 mkdir -p "$CONFIG_DIR"
 
 # --- 1. TEE attestation patch level (TrickyStore / TEESimulator-RS) --------
-# `all=<YYYY-MM-DD>` overrides every partition's patch level in the generated
-# attestation chain. Dotted form matches what autopif4 writes and what the
-# working reference module ships, so the two never fight over format.
-printf 'all=%s\n' "$DOT" > "$CONFIG_DIR/security_patch.txt"
+# TrickyStore's security_patch.txt accepts per-partition keys (system/boot/vendor,
+# dotted). Written per-partition so a manual override for one lands exactly; with
+# no override all three carry the single auto date.
+printf 'system=%s\nvendor=%s\nboot=%s\n' "$SYS" "$VEN" "$BOOT" > "$CONFIG_DIR/security_patch.txt"
 
 # --- 2. PIF wildcard prop: spoof ro.build/ro.vendor/ro.system .security_patch
 # A single `*.security_patch=<date>` line makes PIF's zygisk hook report the
-# patch consistently to every app (this is what GMS / Play Integrity reads).
+# patch to every app (this is what GMS / Play Integrity reads). It is one value,
+# so use the system date.
 for pf in "$MODPATH/custom.pif.prop" "$CONFIG_DIR/custom.pif.prop"; do
     [ -f "$pf" ] || continue
     if grep -qE '^[#]?\*\.security_patch=' "$pf"; then
-        sed -i "s|^[#]\?\*\.security_patch=.*|*.security_patch=$DOT|" "$pf"
+        sed -i "s|^[#]\?\*\.security_patch=.*|*.security_patch=$SYS|" "$pf"
     else
-        printf '*.security_patch=%s\n' "$DOT" >> "$pf"
+        printf '*.security_patch=%s\n' "$SYS" >> "$pf"
     fi
 done
 
 # --- 3. real system props (boot only — needs resetprop) -------------------
 # What every app that PIF does NOT hook reads: Build.VERSION.SECURITY_PATCH,
 # getprop. Banking apps and attestation checkers compare that against the
-# osPatchLevel in the hardware attestation (security_patch.txt above). If the
-# two differ they flag it — v1.0.4 shipped with this OFF and got exactly that
-# report ("OS patch differs: attestation=202607 prop=2026-05-01", fine on
-# v1.0.3). So the props follow the attested patch by default, ON EVERY BOOT.
-#
-# Two rules keep the earlier complaint ("alters the security patch date and
-# never updates it") from coming back:
-#   - never move a device's patch BACKWARDS: only rewrite when the attested
-#     patch is newer than what the device reports. A stale pif can't paint an
-#     old date, and after an OTA that outruns the fingerprint the real value
-#     stays.
-#   - opt-out for users who want Settings to show the untouched date:
-#       spoof_patch_props=0 in alwaysstrong/config
-#     (the old opt-in file spoof_patch_props still forces it on).
+# osPatchLevel in the hardware attestation (security_patch.txt above). They must
+# be EQUAL, so the props are set to exactly the attested date — the fingerprint's
+# own SECURITY_PATCH (or the manual override). This is set verbatim, including
+# when it is OLDER than the device's real patch: a Pixel fingerprint attests a
+# specific date, and the prop has to match it, not the device's real OTA level,
+# or the two disagree and STRONG drops. Opt-out for users who want Settings to
+# show the untouched date: spoof_patch_props=0 in alwaysstrong/config.
+_wp() {   # _wp PROP VALUE — set the prop to VALUE exactly (the attested date)
+    _p="$1"; _v="$2"
+    cur=$(resetprop "$_p" 2>/dev/null)
+    [ -n "$cur" ] || return 0
+    [ "$cur" = "$_v" ] || resetprop -n "$_p" "$_v"
+}
 if [ "$MODE" = "boot" ] && as_on spoof_patch_props && \
    command -v resetprop >/dev/null 2>&1; then
-    FORCE=0; as_on force_patch_props && FORCE=1
-    for p in ro.build.version.security_patch \
-             ro.vendor.build.security_patch \
-             ro.system.build.version.security_patch; do
-        cur=$(resetprop "$p" 2>/dev/null)
-        [ -n "$cur" ] || continue
-        [ "$cur" = "$DOT" ] && continue
-        curp=$(echo "$cur" | tr -cd '0-9')
-        # newer-or-equal real patch: leave it, unless the user forces it
-        if [ "$FORCE" = 0 ] && [ ${#curp} -eq 8 ] && [ "$curp" -ge "$PACKED" ]; then
-            continue
-        fi
-        resetprop -n "$p" "$DOT"
-    done
+    _wp ro.build.version.security_patch        "$SYS"
+    _wp ro.vendor.build.security_patch         "$VEN"
+    _wp ro.system.build.version.security_patch "$SYS"
 fi
 
 echo "$DOT"
