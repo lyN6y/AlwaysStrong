@@ -975,20 +975,19 @@ section[hidden]{display:none}
   var FORCED={"com.android.vending":1,"com.google.android.gms":1,"com.google.android.gsf":1};
   var EXCLUDE={}; ["com.topjohnwu.magisk","io.github.vvb2060.magisk","io.github.huskydg.magisk","me.weishu.kernelsu","com.rifsxd.ksunext","com.sukisu.ultra","me.bmax.apatch","me.garfieldhan.apatch.next","org.lsposed.manager","com.termux","bin.mt.plus","bin.mt.plus.canary","xzr.konabess","io.github.a13e300.ksuwebui","moe.shizuku.privileged.api","com.dergoogler.mmrl","com.dergoogler.mmrl.wx","org.swiftapps.swiftbackup","com.google.android.apps.maps","com.google.android.apps.translate","com.google.android.apps.youtube.music","com.google.android.keep","com.google.android.youtube","com.google.earth","org.zwanoo.android.speedtest","com.android.chrome"].forEach(function(p){ EXCLUDE[p]=1; });
   var MAPF=AS+"/apps.map", PKGS=AS+"/packages";
-  var apps=[], labels={}, appMap={}, icons={};
-  // real app icon (KSU-Next WebUI: getPackagesIcons -> base64 data URI, like Tricky-Addon),
-  // else the first letter of the label as a fallback avatar (other managers / no icon).
-  function avatarHtml(p){ return icons[p]
-    ? '<span class="appav"><img src="'+icons[p]+'" alt="" loading="lazy"></span>'
-    : '<span class="appav">'+esc(avatarFor(p,labels[p]))+'</span>'; }
+  var apps=[], labels={}, appMap={};
+  // real app icon via the KSU-Next WebUI scheme ksu://icon/<pkg>: the manager serves it as a
+  // 512px PNG, lazy-loaded by the browser and LRU-cached (no base64, no blocking), like
+  // Tricky-Addon. On a manager without the scheme the image fails and onerror swaps in the
+  // first-letter avatar.
+  function avatarHtml(p){ var l=esc(avatarFor(p,labels[p]));
+    return '<span class="appav" data-ltr="'+l+'"><img src="ksu://icon/'+encodeURIComponent(p)+'" alt="" loading="lazy" onerror="this.parentNode.textContent=this.parentNode.getAttribute(\'data-ltr\')"></span>'; }
   function specOf(pkg){ var v=appMap[pkg]; if(v==="off") return {off:true}; if(!v) return {kb:"-",mode:FORCED[pkg]?"gen":"auto"}; var b=v.split("|"); return {kb:b[0]||"-",mode:b[1]||"auto"}; }
   function avatarFor(pkg,lbl){ var src=lbl; if(!src){ var parts=String(pkg||"").split("."); src=(parts.length>1?parts[1]:parts[0])||pkg; } src=String(src).replace(/^[^A-Za-z0-9]+/,""); return (src.charAt(0)||"?").toUpperCase(); }
   function loadMap(){ return ksuExec("cat "+shq(MAPF)+" 2>/dev/null").then(function(r){ appMap={}; (r.stdout||"").split("\n").forEach(function(l){ if(!l) return; var i=l.indexOf("\t"); if(i<1) return; appMap[l.slice(0,i).trim()]=l.slice(i+1).trim(); }); }); }
   function saveMap(){ var body=""; Object.keys(appMap).sort().forEach(function(p){ if(appMap[p]) body+=p+"\t"+appMap[p]+"\n"; }); deferBg("mkdir -p "+shq(AS)+" && printf %s "+shq(body)+" > "+shq(MAPF)+"; sh "+shq(MOD+"/build_target_txt.sh")+" "+shq(CFG+"/target.txt")); }
-  function loadApps(){ return ksuExec("{ pm list packages -3; echo com.google.android.gms; echo com.google.android.gsf; echo com.android.vending; cat "+shq(PKGS)+" 2>/dev/null; } 2>/dev/null | sed 's/^package://' | sort -u").then(function(r){ apps=(r.stdout||"").split("\n").map(function(s){ return s.trim(); }).filter(Boolean); labels={}; icons={};
+  function loadApps(){ return ksuExec("{ pm list packages -3; echo com.google.android.gms; echo com.google.android.gsf; echo com.android.vending; cat "+shq(PKGS)+" 2>/dev/null; } 2>/dev/null | sed 's/^package://' | sort -u").then(function(r){ apps=(r.stdout||"").split("\n").map(function(s){ return s.trim(); }).filter(Boolean); labels={};
     try{ if(typeof ksu!=="undefined"&&ksu.getPackagesInfo){ var info=JSON.parse(ksu.getPackagesInfo(JSON.stringify(apps))); (info||[]).forEach(function(x){ if(x&&x.packageName) labels[x.packageName]=x.appLabel||""; }); } }catch(e){}
-    // real app icons (KSU-Next only; other managers lack it, so fall back to letters)
-    try{ if(typeof ksu!=="undefined"&&ksu.getPackagesIcons){ var ics=JSON.parse(ksu.getPackagesIcons(JSON.stringify(apps),48)); (ics||[]).forEach(function(x){ if(x&&x.packageName&&x.icon) icons[x.packageName]=x.icon; }); } }catch(e){}
     }); }
   // mode is shown by the tick colour (like Tricky-Addon), so the badge carries
   // only a non-default keybox name, never the mode.
